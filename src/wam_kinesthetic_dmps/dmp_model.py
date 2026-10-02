@@ -46,11 +46,22 @@ def load_model(path):
     return model
 
 
-def rollout(model):
+def rollout(model, start_position=None, start_velocity=None):
     dmp = DMP(n_dims=7, execution_time=model["execution_time"], dt=model["dt"],
               n_weights_per_dim=model["n_weights_per_dim"])
     dmp.set_weights(np.asarray(model["weights"]))
-    dmp.configure(**{name: np.asarray(model[name]) for name in BOUNDARIES})
+    boundaries = {name: np.asarray(model[name]) for name in BOUNDARIES}
+    if start_position is not None:
+        start_position = np.asarray(start_position, dtype=float)
+        if start_position.shape != (7,) or not np.isfinite(start_position).all():
+            raise ValueError("Expected seven finite starting joint positions")
+        boundaries["start_y"] = start_position
+    if start_velocity is not None:
+        start_velocity = np.asarray(start_velocity, dtype=float)
+        if start_velocity.shape != (7,) or not np.isfinite(start_velocity).all():
+            raise ValueError("Expected seven finite starting joint velocities")
+        boundaries["start_yd"] = start_velocity
+    dmp.configure(**boundaries)
     t, q = dmp.open_loop()
     if not np.isfinite(q).all():
         raise ValueError("Non-finite DMP trajectory")

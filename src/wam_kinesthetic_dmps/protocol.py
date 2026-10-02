@@ -8,10 +8,14 @@ import numpy as np
 PACKET = struct.Struct("<4sIQQ14d")
 MAGIC = b"WAM7"
 COMMAND_MAGIC = b"WAMC"
+POLICY_STATE_MAGIC = b"WAPS"
+ACTION_CHUNK_MAGIC = b"WAMH"
 VERSION = 1
 MAX_COMMAND_HORIZON = 8
 COMMAND_PACKET = struct.Struct("<4sIQQI7d")
 HORIZON_PACKET = struct.Struct(f"<4sIQQI{MAX_COMMAND_HORIZON * 7}d")
+POLICY_STATE_PACKET = struct.Struct("<4sIQQQQ14d")
+ACTION_CHUNK_PACKET = struct.Struct(f"<4sIQQI{MAX_COMMAND_HORIZON * 7}d")
 
 
 @dataclass
@@ -48,6 +52,35 @@ class Command:
             raise ValueError("Expected finite future horizon values")
         self.positions = q
         self.horizon = horizon
+
+
+@dataclass
+class PolicyState:
+    sequence: int
+    timestamp_ns: int
+    remaining_ns: int
+    next_action_index: int
+    positions: np.ndarray
+    velocities: np.ndarray
+
+
+@dataclass
+class ActionChunk:
+    first_index: int
+    sample_period_ns: int
+    actions: np.ndarray
+
+    def __post_init__(self):
+        actions = np.asarray(self.actions, dtype=float)
+        if actions.ndim != 2 or actions.shape[1] != 7:
+            raise ValueError("Expected action chunk with shape (N, 7)")
+        if not 1 <= actions.shape[0] <= MAX_COMMAND_HORIZON:
+            raise ValueError(f"Action chunk must contain 1..{MAX_COMMAND_HORIZON} points")
+        if not np.isfinite(actions).all():
+            raise ValueError("Expected finite action positions")
+        if self.sample_period_ns <= 0:
+            raise ValueError("Sample period must be positive")
+        self.actions = actions
 
 
 def encode(state):
@@ -114,6 +147,63 @@ def decode_command(data):
     if not np.isfinite(values).all() or ns == 0:
         raise ValueError("Invalid command values or timestamp")
     return Command(seq, ns, positions, horizon=horizon)
+
+
+def encode_policy_state(state):
+    q = np.asarray(state.positions, dtype=float)
+    dq = np.asarray(state.velocities, dtype=float)
+    if q.shape != (7,) or dq.shape != (7,) or not np.isfinite([q, dq]).all():
+        raise ValueError("Expected seven finite state positions and velocities")
+    if state.timestamp_ns <= 0 or state.remaining_ns < 0:
+        raise ValueError("Invalid policy state timestamp or buffer duration")
+    return POLICY_STATE_PACKET.pack(
+        POLICY_STATE_MAGIC, VERSION, state.sequence, state.timestamp_ns,
+        state.remaining_ns, state.next_action_index, *q, *dq,
+    )
+
+
+def decode_policy_state(data):
+    if len(data) != POLICY_STATE_PACKET.size:
+        raise ValueError(f"Expected {POLICY_STATE_PACKET.size} bytes, got {len(data)}")
+    magic, version, sequence, timestamp_ns, remaining_ns, next_action_index, *values = POLICY_STATE_PACKET.unpack(data)
+    if magic != POLICY_STATE_MAGIC or version != VERSION:
+        raise ValueError("Unrecognized policy-state protocol")
+    if timestamp_ns == 0 or not np.isfinite(values).all():
+        raise ValueError("Invalid policy state timestamp or values")
+    return PolicyState(
+        sequence, timestamp_ns, remaining_ns, next_action_index,
+        np.asarray(values[:7]), np.asarray(values[7:]),
+    )
+
+
+def encode_action_chunk(chunk):
+    actions = np.asarray(chunk.actions, dtype=float)
+    if actions.ndim != 2 or actions.shape[1] != 7:
+        raise ValueError("Expected action chunk with shape (N, 7)")
+    if not 1 <= actions.shape[0] <= MAX_COMMAND_HORIZON:
+        raise ValueError(f"Action chunk must contain 1..{MAX_COMMAND_HORIZON} points")
+    if not np.isfinite(actions).all() or chunk.sample_period_ns <= 0:
+        raise ValueError("Invalid action chunk values or sample period")
+    padded = np.zeros((MAX_COMMAND_HORIZON, 7), dtype=float)
+    padded[:len(actions)] = actions
+    return ACTION_CHUNK_PACKET.pack(
+        ACTION_CHUNK_MAGIC, VERSION, chunk.first_index, chunk.sample_period_ns,
+        len(actions), *padded.reshape(-1),
+    )
+
+
+def decode_action_chunk(data):
+    if len(data) != ACTION_CHUNK_PACKET.size:
+        raise ValueError(f"Expected {ACTION_CHUNK_PACKET.size} bytes, got {len(data)}")
+    magic, version, first_index, sample_period_ns, count, *values = ACTION_CHUNK_PACKET.unpack(data)
+    if magic != ACTION_CHUNK_MAGIC or version != VERSION:
+        raise ValueError("Unrecognized action-chunk protocol")
+    if not 1 <= count <= MAX_COMMAND_HORIZON or sample_period_ns == 0:
+        raise ValueError("Invalid action chunk length or sample period")
+    actions = np.asarray(values[:count * 7], dtype=float).reshape(count, 7)
+    if not np.isfinite(actions).all():
+        raise ValueError("Invalid action chunk positions")
+    return ActionChunk(first_index, sample_period_ns, actions)
 
 
 class Receiver:

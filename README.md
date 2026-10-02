@@ -228,3 +228,57 @@ to gravity compensation rather than applying a controlled braking trajectory.
 The cubic interpolator imposes zero endpoint velocities. Replay settings are
 software bounds, not collision checks. The C++ build and offline validation tests
 have been exercised; robot replay has **not** been run by the assistant.
+
+## Live state-feedback policy
+
+`wam_policy` publishes measured joint positions, velocities, remaining action-buffer
+time, and the next expected action index to Python over UDP. Python initializes the
+saved DMP from that measured posture and velocity, then refills the WAM with ordered
+chunks of up to eight joint-position samples. Each chunk carries its sample interval
+and first action index; the WAM acknowledges accepted samples in later state packets.
+The controller queues the samples and interpolates them at its control rate. Python
+refills when the remaining buffer drops below the configured threshold, rather than
+streaming one DMP sample per UDP packet. The packet protocol is separate from the
+recording protocol, so recording remains compatible with older demos.
+
+Install the updated Python entry point after pulling the project:
+
+```bash
+python -m pip install -e .
+```
+
+On the WAM computer, with CAN configured and the teaching/replay programs stopped:
+
+```bash
+source scripts/setup_zeus.sh
+export WAM_POLICY_HOST=192.168.1.20
+./build/controller/wam_policy
+```
+
+Set `WAM_POLICY_HOST` to the Python computer's IPv4 address. It defaults to
+`127.0.0.1` when both processes run on the same machine. The WAM publishes feedback
+to UDP port `6562` and accepts action chunks on port `6561`.
+
+On the Python computer, use the WAM's IPv4 address for `--host` and `--source-ip`:
+
+```bash
+source .venv/bin/activate
+wam-run-policy data/zeus_model_003.json \
+  --host 192.168.1.10 --bind 0.0.0.0 --source-ip 192.168.1.10
+```
+
+For a single-computer setup, use `--host 127.0.0.1 --bind 127.0.0.1` and set
+`WAM_POLICY_HOST=127.0.0.1`. Ensure UDP ports `6561` and `6562` are permitted by any
+host firewall. The controller stays in gravity compensation until it receives its
+first valid action chunk; place the arm in a suitable starting posture first. The
+DMP's trained goal is preserved, while its rollout start is set from the live WAM
+state. Default buffering targets `0.6` seconds and begins refilling below `0.25`
+seconds; tune with `--buffer-seconds` and `--refill-threshold`. If the queue empties
+and chunks stop arriving for `0.5` seconds, the controller returns to gravity
+compensation.
+
+This interface isolates policy generation from robot execution: future DMP,
+diffusion, or flow-matching backends can consume the same feedback state and produce
+the same indexed action chunks. The current DMP backend generates one rollout when
+the first state arrives; it does not retrain the model online. Hardware execution
+still requires supervised validation on the physical WAM.

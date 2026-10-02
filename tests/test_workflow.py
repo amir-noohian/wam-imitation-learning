@@ -81,6 +81,9 @@ def test_training_and_model_roundtrip(tmp_path):
     ot, oq = rollout(model)
     np.testing.assert_array_equal(rt, ot)
     np.testing.assert_allclose(rq, oq, atol=1e-12)
+    live_start = np.full(7, 0.025)
+    _, live_rollout = rollout(model, start_position=live_start, start_velocity=np.zeros(7))
+    np.testing.assert_allclose(live_rollout[0], live_start, atol=1e-12)
     interpolated = np.column_stack([np.interp(t, rt, rq[:, j]) for j in range(7)])
     assert np.sqrt(np.mean((interpolated - q)**2)) < 0.01
     with pytest.raises(ValueError, match="Sampling gap"):

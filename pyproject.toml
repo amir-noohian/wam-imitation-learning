@@ -19,6 +19,7 @@ wam-preview = "wam_kinesthetic_dmps.cli:preview"
 wam-export = "wam_kinesthetic_dmps.replay:main"
 wam-simulate = "wam_kinesthetic_dmps.cli:simulate"
 wam-send-policy = "wam_kinesthetic_dmps.policy:main"
+wam-run-policy = "wam_kinesthetic_dmps.policy:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
