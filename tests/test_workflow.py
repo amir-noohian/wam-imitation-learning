@@ -84,6 +84,25 @@ def test_training_and_model_roundtrip(tmp_path):
     live_start = np.full(7, 0.025)
     _, live_rollout = rollout(model, start_position=live_start, start_velocity=np.zeros(7))
     np.testing.assert_allclose(live_rollout[0], live_start, atol=1e-12)
+    _, unchanged_rollout = rollout(model, start_position=live_start, start_velocity=np.zeros(7))
+    np.testing.assert_allclose(live_rollout, unchanged_rollout, atol=1e-12)
+    offset = np.full(7, 0.05)
+    _, translated_rollout = rollout(
+        model,
+        start_position=np.asarray(model["start_y"]) + offset,
+        start_velocity=np.asarray(model["start_yd"]),
+        goal_position=np.asarray(model["goal_y"]) + offset,
+        retarget_forcing=True,
+    )
+    np.testing.assert_allclose(translated_rollout, oq + offset, atol=0.01)
+    goal = np.asarray(model["goal_y"])
+    _, retargeted_from_goal = rollout(
+        model,
+        start_position=goal,
+        start_velocity=np.zeros(7),
+        retarget_forcing=True,
+    )
+    np.testing.assert_allclose(retargeted_from_goal, np.tile(goal, (len(rt), 1)), atol=1e-8)
     interpolated = np.column_stack([np.interp(t, rt, rq[:, j]) for j in range(7)])
     assert np.sqrt(np.mean((interpolated - q)**2)) < 0.01
     with pytest.raises(ValueError, match="Sampling gap"):

@@ -93,7 +93,12 @@ def test_policy_sender_refills_from_robot_feedback(tmp_path):
 
     start_position = np.full(7, 0.05)
     model = load_model(model_path)
-    _, expected_actions = rollout(model, start_position=start_position, start_velocity=np.zeros(7))
+    _, expected_actions = rollout(
+        model,
+        start_position=start_position,
+        start_velocity=np.zeros(7),
+        retarget_forcing=True,
+    )
 
     state_probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     state_probe.bind(("127.0.0.1", 0))
@@ -118,6 +123,7 @@ def test_policy_sender_refills_from_robot_feedback(tmp_path):
                     buffer_seconds=0.08,
                     refill_threshold=0.04,
                     state_timeout=1.0,
+                    retarget_forcing=True,
                 )
             except Exception as exc:
                 runner_errors.append(exc)

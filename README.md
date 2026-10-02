@@ -264,8 +264,18 @@ On the Python computer, use the WAM's IPv4 address for `--host` and `--source-ip
 ```bash
 source .venv/bin/activate
 wam-run-policy data/zeus_model_003.json \
-  --host 192.168.1.10 --bind 0.0.0.0 --source-ip 192.168.1.10
+  --host 192.168.1.10 --bind 0.0.0.0 --source-ip 192.168.1.10 \
+  --retarget-forcing
 ```
+
+Without `--retarget-forcing`, the runner keeps the previous behavior: it uses the
+live starting pose with the demo's unscaled forcing term. With the flag, the runner
+scales each joint's learned forcing by the ratio of its new start-to-goal displacement
+to the demo displacement. Scaling is capped at 3x. For joints whose demo displacement
+is below 0.02 rad, learned forcing is disabled to avoid amplifying demonstration
+noise. The goal defaults to the trained goal; `--goal J1 J2 J3 J4 J5 J6 J7` can
+override it in radians. Retargeting is not a substitute for validating joint limits,
+velocity, or collision clearance before hardware motion.
 
 For a single-computer setup, use `--host 127.0.0.1 --bind 127.0.0.1` and set
 `WAM_POLICY_HOST=127.0.0.1`. Ensure UDP ports `6561` and `6562` are permitted by any

@@ -5,6 +5,7 @@ from pathlib import Path
 import numpy as np
 from movement_primitives.dmp import DMP
 from .recorder import JOINT_NAMES, load_demo
+from .dmp_retargeting import scale_forcing_weights
 
 BOUNDARIES = ("start_y", "start_yd", "start_ydd", "goal_y", "goal_yd", "goal_ydd")
 
@@ -46,10 +47,15 @@ def load_model(path):
     return model
 
 
-def rollout(model, start_position=None, start_velocity=None):
+def rollout(
+    model,
+    start_position=None,
+    start_velocity=None,
+    goal_position=None,
+    retarget_forcing=False,
+):
     dmp = DMP(n_dims=7, execution_time=model["execution_time"], dt=model["dt"],
               n_weights_per_dim=model["n_weights_per_dim"])
-    dmp.set_weights(np.asarray(model["weights"]))
     boundaries = {name: np.asarray(model[name]) for name in BOUNDARIES}
     if start_position is not None:
         start_position = np.asarray(start_position, dtype=float)
@@ -61,6 +67,23 @@ def rollout(model, start_position=None, start_velocity=None):
         if start_velocity.shape != (7,) or not np.isfinite(start_velocity).all():
             raise ValueError("Expected seven finite starting joint velocities")
         boundaries["start_yd"] = start_velocity
+    if goal_position is not None:
+        goal_position = np.asarray(goal_position, dtype=float)
+        if goal_position.shape != (7,) or not np.isfinite(goal_position).all():
+            raise ValueError("Expected seven finite goal joint positions")
+        boundaries["goal_y"] = goal_position
+    weights = np.asarray(model["weights"], dtype=float).reshape(
+        7, model["n_weights_per_dim"]
+    )
+    if retarget_forcing:
+        weights, _ = scale_forcing_weights(
+            weights,
+            model["start_y"],
+            model["goal_y"],
+            boundaries["start_y"],
+            boundaries["goal_y"],
+        )
+    dmp.set_weights(weights.ravel())
     dmp.configure(**boundaries)
     t, q = dmp.open_loop()
     if not np.isfinite(q).all():

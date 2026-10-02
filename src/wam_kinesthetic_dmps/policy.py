@@ -49,6 +49,8 @@ def send_actions(
     state_timeout=3.0,
     duration=None,
     chunk_size=8,
+    goal_position=None,
+    retarget_forcing=False,
 ):
     if not np.isfinite([buffer_seconds, refill_threshold, state_timeout]).all():
         raise ValueError("Buffer and timeout settings must be finite")
@@ -83,13 +85,20 @@ def send_actions(
                 if state.remaining_ns > 0:
                     continue
                 base_index = state.next_action_index
-                t, actions = rollout(model, start_position=state.positions, start_velocity=state.velocities)
+                t, actions = rollout(
+                    model,
+                    start_position=state.positions,
+                    start_velocity=state.velocities,
+                    goal_position=goal_position,
+                    retarget_forcing=retarget_forcing,
+                )
                 if duration is not None:
                     mask = t <= duration
                     actions = actions[mask]
                 if len(actions) == 0:
                     raise ValueError("No policy actions were generated")
-                print(f"DMP initialized from live WAM state; {len(actions)} action samples at {1e9 / sample_period_ns:.1f} Hz", flush=True)
+                mode = "retargeted" if retarget_forcing else "unscaled"
+                print(f"DMP initialized from live WAM state ({mode}); {len(actions)} action samples at {1e9 / sample_period_ns:.1f} Hz", flush=True)
 
             if state.next_action_index < base_index:
                 raise RuntimeError("WAM action index moved backwards during the rollout")
@@ -137,6 +146,10 @@ def main():
     parser.add_argument("--state-timeout", type=float, default=3.0)
     parser.add_argument("--duration", type=float, help="Optional total execution time in seconds")
     parser.add_argument("--chunk-size", type=int, default=8)
+    parser.add_argument("--goal", nargs=7, type=float, metavar=("J1", "J2", "J3", "J4", "J5", "J6", "J7"),
+                        help="Optional target joint position in radians; defaults to the trained DMP goal")
+    parser.add_argument("--retarget-forcing", action="store_true",
+                        help="Scale DMP forcing for the live start and selected goal; suppresses learned forcing on demo joints moving under 0.02 rad")
     args = parser.parse_args()
     send_actions(
         args.model,
@@ -150,6 +163,8 @@ def main():
         state_timeout=args.state_timeout,
         duration=args.duration,
         chunk_size=args.chunk_size,
+        goal_position=args.goal,
+        retarget_forcing=args.retarget_forcing,
     )
 
 
